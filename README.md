@@ -8,22 +8,80 @@ keeps picking up.
 All graphics, including the font, are drawn in code, so there are no asset
 files to download.
 
-## Requirements
+## macOS Terminal Setup & Launch Guide
 
-- Python 3.9 or newer
-- Pygame 2.5.0 or newer (installed from `requirements.txt`)
+Open **Terminal** (Applications → Utilities → Terminal, or press `⌘ Space`
+and type "Terminal"), then follow these four steps.
 
-## Setup
-
-Create and activate a virtual environment, then install the dependencies.
-
-**macOS / Linux**
+### Step 1: Go to the project folder
 
 ```bash
-python -m venv venv
+cd /path/to/your/project_folder
+```
+
+> Replace `/path/to/your/project_folder` with the real location of the
+> folder. You can also type `cd ` (with a space at the end), drag the folder
+> from Finder into the Terminal window to paste its path, and press `Return`.
+
+### Step 2: Create and activate a virtual environment
+
+```bash
+python3 -m venv venv
 source venv/bin/activate
+```
+
+The first command creates a `venv` folder inside the project, which keeps
+the game's packages separate from the rest of your Mac. You only need it
+once. The second command switches it on; your prompt should now start with
+`(venv)`.
+
+### Step 3: Install the dependencies
+
+```bash
 pip install -r requirements.txt
 ```
+
+This installs Pygame 2.5.0 or newer.
+
+### Step 4: Launch the game
+
+```bash
+python main.py
+```
+
+> Inside the virtual environment, `python` points to the right version. If
+> you run the game without activating it, use `python3 main.py` instead.
+
+### Tips & Notes
+
+- **Python 3.9 or newer is required.** Check your version with:
+
+  ```bash
+  python3 --version
+  ```
+
+  If `python3` isn't found, install Python from
+  [python.org](https://www.python.org/downloads/macos/) or with Homebrew
+  (`brew install python`).
+
+- **To leave the virtual environment** when you're done:
+
+  ```bash
+  deactivate
+  ```
+
+- **To play again later,** you don't need to reinstall. Go to the folder,
+  activate the environment and launch:
+
+  ```bash
+  cd /path/to/your/project_folder
+  source venv/bin/activate
+  python main.py
+  ```
+
+### Other platforms
+
+**Linux:** the same steps as macOS work.
 
 **Windows (PowerShell)**
 
@@ -31,6 +89,7 @@ pip install -r requirements.txt
 python -m venv venv
 venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+python main.py
 ```
 
 **Windows (Command Prompt)**
@@ -39,13 +98,6 @@ pip install -r requirements.txt
 python -m venv venv
 venv\Scripts\activate.bat
 pip install -r requirements.txt
-```
-
-> On some systems the command is `python3` instead of `python`.
-
-## Run
-
-```bash
 python main.py
 ```
 
