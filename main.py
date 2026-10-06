@@ -6,11 +6,15 @@ A pixel-art endless runner set in a Wild West desert, built with Pygame.
 
 Roll a stitched leather ball across the sand and jump over cacti, skull
 rocks and tumbleweeds. The longer you survive, the faster the desert
-scrolls by.
+scrolls by. Grab floating power-ups along the way:
+
+    Winged Horseshoe   Double jump for 10 seconds
+    Golden Star        Invincibility for 5 seconds (smash through obstacles)
+    Coin Bag           +100 bonus points
 
 Controls
 --------
-SPACE / UP     Jump
+SPACE / UP     Jump (press again in mid-air with a Winged Horseshoe)
 DOWN           Drop faster while in the air
 R / SPACE      Restart after Game Over
 ESC            Quit
@@ -97,6 +101,25 @@ OBSTACLE_TYPES = {
 TUMBLEWEED_HOP = 6          # Max bounce height of a tumbleweed
 GAP_RANDOM_EXTRA = 160      # Random spacing added on top of the minimum gap
 
+# --- Power-ups ---------------------------------------------------------------
+FIRST_POWERUP_TIME = 4.0          # Seconds of play before the first item
+POWERUP_INTERVAL = (6.0, 11.0)    # Seconds between items (min, max)
+POWERUP_RETRY_DELAY = 0.25        # Wait before retrying when no safe gap is free
+POWERUP_RADIUS = 6                # Pickup circle radius
+POWERUP_CLEARANCE = 28            # Min horizontal distance from any obstacle
+POWERUP_BOB_AMPLITUDE = 2         # Floating bob, in pixels
+# Item centre heights: rolled into on the ground, or caught with a jump
+# ("low" across most of the jump arc, "high" only near the top of it).
+POWERUP_HEIGHTS = {"ground": GROUND_Y - 10, "low": GROUND_Y - 40, "high": GROUND_Y - 52}
+POWERUP_HEIGHT_WEIGHTS = {"ground": 3, "low": 4, "high": 3}
+DOUBLE_JUMP_VELOCITY = -4.9       # A little weaker than the ground jump
+SCORE_BOOST_POINTS = 100
+SMASH_POINTS = 20                 # Bonus for smashing an obstacle while invincible
+SMASH_SHAKE_FRAMES = 6
+EFFECT_WARNING_FRAMES = int(1.5 * FPS)  # HUD bar and aura blink when this close to ending
+POPUP_LIFETIME = 1.3              # Seconds a floating text stays on screen
+POPUP_RISE_SPEED = 16.0           # px / s
+
 
 def rgb(hex_code):
     """Convert '#RRGGBB' into an (r, g, b) tuple."""
@@ -168,6 +191,123 @@ COLOR_WOOD_DARK = rgb("#6B4426")
 COLOR_WOOD_LIGHT = rgb("#B5814F")
 COLOR_NAIL = rgb("#3A2416")
 
+COLOR_WHITE = rgb("#FFFFFF")
+COLOR_GOLD = rgb("#F6C453")
+COLOR_GOLD_DARK = rgb("#D9952B")
+COLOR_GOLD_LIGHT = rgb("#FFF4C2")
+COLOR_STEEL = rgb("#C3CDD6")
+COLOR_STEEL_DARK = rgb("#8994A0")
+COLOR_STEEL_NAIL = rgb("#5E6A75")
+COLOR_SKY_BLUE = rgb("#8EC3E6")
+COLOR_SACK = rgb("#B07A45")
+COLOR_SACK_DARK = rgb("#8A5A33")
+COLOR_HUD_BAR_BG = rgb("#7A5A3C")
+RAINBOW_COLORS = [rgb("#F6C453"), rgb("#F28C38"), rgb("#E2574C"),
+                  rgb("#C86FC9"), rgb("#5FA8E8"), rgb("#6CC47A")]
+SMASH_COLORS = {
+    "cactus": [COLOR_CACTUS, COLOR_CACTUS_LIGHT, COLOR_CACTUS_DARK, COLOR_CACTUS_SPINE],
+    "skull_rock": [COLOR_ROCK, COLOR_ROCK_LIGHT, COLOR_ROCK_DARK, COLOR_BONE],
+    "tumbleweed": [COLOR_TUMBLE, COLOR_TUMBLE_LIGHT, COLOR_TUMBLE_DARK],
+}
+
+
+# ===========================================================================
+# Power-up definitions
+# ===========================================================================
+# duration is in frames (0 = instant effect). glow and sparkle colours are
+# used for the floating item; bar_color for its HUD timer.
+POWERUP_TYPES = {
+    "double_jump": {
+        "name": "Winged Horseshoe",
+        "duration": 10 * FPS,
+        "weight": 35,
+        "popup": "DOUBLE JUMP ACTIVE!",
+        "text_color": COLOR_STEEL,
+        "glow": (220, 235, 245),
+        "bar_color": COLOR_SKY_BLUE,
+        "sparkles": [COLOR_WHITE, COLOR_STEEL, COLOR_SKY_BLUE],
+    },
+    "invincible": {
+        "name": "Golden Star",
+        "duration": 5 * FPS,
+        "weight": 25,
+        "popup": "INVINCIBLE!",
+        "text_color": COLOR_GOLD,
+        "glow": (255, 214, 102),
+        "bar_color": COLOR_GOLD,
+        "sparkles": RAINBOW_COLORS,
+    },
+    "score_boost": {
+        "name": "Coin Bag",
+        "duration": 0,
+        "weight": 40,
+        "bonus": SCORE_BOOST_POINTS,
+        "popup": f"+{SCORE_BOOST_POINTS} BONUS!",
+        "text_color": COLOR_GOLD_LIGHT,
+        "glow": (255, 220, 120),
+        "bar_color": COLOR_GOLD,
+        "sparkles": [COLOR_GOLD, COLOR_GOLD_LIGHT, COLOR_WHITE],
+    },
+}
+HUD_EFFECT_ORDER = ["invincible", "double_jump"]  # Timed effects shown in the HUD
+
+# Pixel art for the items: each character maps to a colour, '.' is empty.
+# A dark outline is added automatically around every sprite.
+POWERUP_PIXEL_ART = {
+    "double_jump": [            # Winged horseshoe, opening up for luck
+        "...ss...ss...",
+        "w..sn...ns..w",
+        "ww.ss...ss.ww",
+        "wwwsn...nswww",
+        ".vvss...ssvv.",
+        "..vsn...nsv..",
+        "...ss...ss...",
+        "...sss.sss...",
+        "....sssss....",
+        ".....ddd.....",
+    ],
+    "invincible": [             # Golden star
+        ".....Y.....",
+        ".....Y.....",
+        "....YYY....",
+        "YYYYYWYYYYY",
+        ".YYWYYYYYO.",
+        "..YYYYYYO..",
+        "...YYYYO...",
+        "..YYYYYOO..",
+        "..YYO.YOO..",
+        ".YO.....OO.",
+        ".O.......O.",
+    ],
+    "score_boost": [            # Coin bag with a gold dollar sign
+        "..b.....b..",
+        "...b...b...",
+        "....bbb....",
+        "....rrr....",
+        "...bbbbb...",
+        "..bbbGbbb..",
+        ".bbbGGGbbB.",
+        ".bbbGbbbbB.",
+        "bbbbGGGbbbB",
+        "bbbbbbGbbbB",
+        "bbbbGGGbbbB",
+        ".bbbbGbbbB.",
+        "..BBBBBBB..",
+    ],
+}
+POWERUP_PIXEL_COLORS = {
+    "s": COLOR_STEEL, "n": COLOR_STEEL_NAIL, "d": COLOR_STEEL_DARK,
+    "w": COLOR_WHITE, "v": rgb("#E6DCCB"),
+    "Y": COLOR_GOLD, "O": COLOR_GOLD_DARK, "W": COLOR_GOLD_LIGHT,
+    "b": COLOR_SACK, "B": COLOR_SACK_DARK, "r": COLOR_GOLD, "G": rgb("#FFD45E"),
+}
+
+# Little wings that flap beside the ball while a double jump is available.
+WING_FRAMES = [
+    ["w...", "ww..", ".www"],   # Wings up
+    [".www", "ww..", "w..."],   # Wings down
+]
+
 
 # ===========================================================================
 # Pixel font (5x7 glyphs, so no font files are needed)
@@ -215,6 +355,7 @@ PIXEL_FONT = {
     "?": [".###.", "#...#", "....#", "...#.", "..#..", ".....", "..#.."],
     ":": [".....", "..#..", "..#..", ".....", "..#..", "..#..", "....."],
     "-": [".....", ".....", ".....", ".###.", ".....", ".....", "....."],
+    "+": [".....", "..#..", "..#..", "#####", "..#..", "..#..", "....."],
     ".": [".....", ".....", ".....", ".....", ".....", ".##..", ".##.."],
     "/": ["....#", "....#", "...#.", "..#..", ".#...", "#....", "#...."],
 }
@@ -259,6 +400,23 @@ def draw_text(screen, text, x, y, color, scale=1, align="left", shadow=None):
     screen.blit(surface, (x, y))
 
 
+def render_outlined_text(text, color, outline=COLOR_TEXT_DARK):
+    """Render pixel text with a 1 px outline all round, so it reads on any background."""
+    key = ("outlined", text, color, outline)
+    if key in _text_cache:
+        return _text_cache[key]
+
+    inner = render_pixel_text(text, color)
+    border = render_pixel_text(text, outline)
+    surface = pygame.Surface((inner.get_width() + 2, inner.get_height() + 2), pygame.SRCALPHA)
+    for dx, dy in ((0, 1), (2, 1), (1, 0), (1, 2), (0, 0), (2, 2), (0, 2), (2, 0)):
+        surface.blit(border, (dx, dy))
+    surface.blit(inner, (1, 1))
+
+    _text_cache[key] = surface
+    return surface
+
+
 # ===========================================================================
 # Setup
 # ===========================================================================
@@ -282,31 +440,43 @@ def init_game():
     return screen, canvas, clock, state, high_score
 
 
-def reset_game():
-    """Return a fresh game state: score, player, speed, obstacles and effects."""
-    player_rect = pygame.Rect(0, 0, PLAYER_RADIUS * 2, PLAYER_RADIUS * 2)
-    player_rect.midbottom = (PLAYER_X, GROUND_Y)
-
-    # The first obstacle starts off-screen to give the player a moment to settle.
-    first_obstacle = _create_obstacle(BASE_SPEED, CANVAS_WIDTH + FIRST_OBSTACLE_OFFSET)
-
+def create_player():
+    """Return a fresh player: position, motion, animation and power-up state."""
+    rect = pygame.Rect(0, 0, PLAYER_RADIUS * 2, PLAYER_RADIUS * 2)
+    rect.midbottom = (PLAYER_X, GROUND_Y)
     return {
-        # Player
-        "player_rect": player_rect,
+        "rect": rect,
         "velocity_y": 0.0,
         "is_jumping": False,
+        "double_jump_ready": True,   # Refilled on every landing
         "roll_angle": 0.0,
         "squash": {"y": 1.0, "velocity": 0.0},
         "squash_x": 1.0,
         "squash_y": 1.0,
+        "effects": {},               # Active timed power-ups: type -> frames left
+    }
+
+
+def reset_game():
+    """Return a fresh game state: score, player, speed, obstacles, items and effects."""
+    # The first obstacle starts off-screen to give the player a moment to settle.
+    first_obstacle = _create_obstacle(BASE_SPEED, CANVAS_WIDTH + FIRST_OBSTACLE_OFFSET)
+
+    return {
+        "player": create_player(),
+        "jump_tapped": False,        # A fresh jump key press this frame (for double jumps)
         # World
         "scroll_speed": BASE_SPEED,
         "distance": 0.0,
         "obstacles": [first_obstacle],
+        "powerups": [],
+        "next_powerup_time": FIRST_POWERUP_TIME,
         # Effects
         "particles": [],
         "trail": [],
+        "floating_texts": [],
         "shake": 0,
+        "tick": 0,                   # Animation clock that keeps running after a crash
         # Progress
         "score": 0.0,
         "frame": 0,
@@ -367,6 +537,29 @@ def update_physics(player_rect, velocity_y):
         return 0.0, False
 
     return velocity_y, True
+
+
+def try_double_jump(player):
+    """Jump again in mid-air if a Winged Horseshoe is active and unused since landing.
+
+    Returns:
+        True if the double jump happened.
+    """
+    if not (player["is_jumping"] and player["double_jump_ready"]
+            and "double_jump" in player["effects"]):
+        return False
+    player["velocity_y"] = DOUBLE_JUMP_VELOCITY
+    player["double_jump_ready"] = False
+    return True
+
+
+def tick_active_effects(player):
+    """Count down timed power-ups by one frame and drop the ones that ran out."""
+    effects = player["effects"]
+    for effect_type in list(effects):
+        effects[effect_type] -= 1
+        if effects[effect_type] <= 0:
+            del effects[effect_type]
 
 
 # ===========================================================================
@@ -470,6 +663,30 @@ def emit_crash_burst(particles, player_rect):
                    lifetime=(0.4, 0.9), sizes=(1, 2, 2, 3), colors=CRASH_COLORS)
 
 
+def emit_double_jump_burst(particles, player_rect):
+    """White feathers puffing downward from a mid-air jump."""
+    emit_particles(particles, player_rect.centerx, player_rect.bottom, 10,
+                   velocity_x=(-70, 40), velocity_y=(10, 70), lifetime=(0.25, 0.5),
+                   sizes=(1, 1, 2), colors=[COLOR_WHITE, COLOR_STITCH, COLOR_STEEL])
+
+
+def emit_pickup_sparkles(particles, x, y, powerup_type):
+    """Sparkle burst in the item's colours when it is collected."""
+    emit_particles(particles, x, y, 16, velocity_x=(-90, 90), velocity_y=(-110, 10),
+                   lifetime=(0.3, 0.7), sizes=(1, 1, 2),
+                   colors=POWERUP_TYPES[powerup_type]["sparkles"])
+
+
+def emit_smash_debris(particles, obstacle):
+    """Chunks flying off an obstacle smashed by an invincible ball."""
+    kind = obstacle["kind"]
+    colors = SMASH_COLORS.get(kind, SMASH_COLORS["cactus"])
+    rect = obstacle["rect"]
+    emit_particles(particles, rect.centerx, rect.centery, 18,
+                   velocity_x=(-40, 160), velocity_y=(-140, -30), lifetime=(0.4, 0.8),
+                   sizes=(1, 2, 2, 3), colors=colors)
+
+
 def update_particles(particles, dt):
     """Move particles with gravity, let them settle on the ground, drop expired ones.
 
@@ -538,8 +755,11 @@ def update_motion_trail(trail_history, player_rect, squash_x, squash_y, scroll_s
     return trail_history
 
 
-def draw_motion_trails(screen, trail_history):
-    """Draw fading, semi-transparent ghost outlines of recent ball positions."""
+def draw_motion_trails(screen, trail_history, color=COLOR_LEATHER):
+    """Draw fading, semi-transparent ghost outlines of recent ball positions.
+
+    color tints the ghosts (gold while invincible).
+    """
     count = len(trail_history)
     for index, ghost in enumerate(trail_history):
         strength = (index + 1) / (count + 1)        # Older ghosts are fainter
@@ -548,7 +768,7 @@ def draw_motion_trails(screen, trail_history):
         height = max(2, round(BALL_SIZE * ghost["squash_y"]))
 
         image = pygame.Surface((width, height), pygame.SRCALPHA)
-        pygame.draw.ellipse(image, (*COLOR_LEATHER, alpha // 2), image.get_rect())
+        pygame.draw.ellipse(image, (*color, alpha // 2), image.get_rect())
         pygame.draw.ellipse(image, (*COLOR_STITCH, alpha), image.get_rect(), 1)
         screen.blit(image, (round(ghost["x"]) - width // 2, ghost["bottom"] + 1 - height))
 
@@ -582,6 +802,7 @@ def _create_obstacle(scroll_speed, x=None):
         "angle": 0.0,                           # Tumbleweed spin
         "phase": random.uniform(0, math.pi),    # Tumbleweed bounce timing
         "flower": random.random() < 0.35,       # Some cacti are in bloom
+        "smashed": False,                       # Destroyed by an invincible ball
     }
 
 
@@ -602,16 +823,13 @@ def spawn_and_update_obstacles(obstacles, scroll_speed):
             hop = abs(math.sin(obstacle["phase"])) * TUMBLEWEED_HOP
             obstacle["rect"].bottom = GROUND_Y - round(hop)
 
-    obstacles = [ob for ob in obstacles if ob["rect"].right > -4]
-
-    if not obstacles:
+    if not obstacles or CANVAS_WIDTH - obstacles[-1]["rect"].right >= obstacles[-1]["gap"]:
         obstacles.append(_create_obstacle(scroll_speed))
-    else:
-        last = obstacles[-1]
-        if CANVAS_WIDTH - last["rect"].right >= last["gap"]:
-            obstacles.append(_create_obstacle(scroll_speed))
 
-    return obstacles
+    # Drop obstacles that have left the screen, but always keep the newest one:
+    # the gap to the next obstacle (and to any power-up) is measured from it.
+    newest = obstacles[-1]
+    return [ob for ob in obstacles if ob["rect"].right > -4 or ob is newest]
 
 
 def _obstacle_parts(obstacle):
@@ -666,27 +884,242 @@ def _circle_hits_rect(cx, cy, radius, rect):
     return (cx - nearest_x) ** 2 + (cy - nearest_y) ** 2 < radius ** 2
 
 
-def check_collision(player_rect, obstacles):
-    """Check the ball (as a circle) against every obstacle.
+def find_colliding_obstacle(player_rect, obstacles):
+    """Return the first obstacle the ball (as a circle) touches, or None.
 
     Cacti and skull rocks are tested part by part; tumbleweeds are circles.
     """
     cx, cy = player_rect.center
 
     for obstacle in obstacles:
+        if obstacle["smashed"]:
+            continue
         if obstacle["kind"] == "tumbleweed":
             ox, oy = obstacle["rect"].center
             reach = HITBOX_RADIUS + obstacle["rect"].width / 2 - 1
             if (cx - ox) ** 2 + (cy - oy) ** 2 < reach ** 2:
-                return True
+                return obstacle
         else:
             if not player_rect.colliderect(obstacle["rect"]):
                 continue
             for part in _obstacle_parts(obstacle):
                 if _circle_hits_rect(cx, cy, HITBOX_RADIUS, part):
-                    return True
+                    return obstacle
 
-    return False
+    return None
+
+
+def check_collision(player_rect, obstacles):
+    """True if the ball touches any obstacle."""
+    return find_colliding_obstacle(player_rect, obstacles) is not None
+
+
+# ===========================================================================
+# Power-ups
+# ===========================================================================
+
+def _choose_weighted(weights_by_name):
+    """Pick a key from a {name: weight} dict."""
+    names = list(weights_by_name)
+    return random.choices(names, weights=[weights_by_name[name] for name in names])[0]
+
+
+def spawn_powerup(powerups, current_time, obstacles=()):
+    """Place one random item in a safe gap between obstacles.
+
+    The item goes somewhere between the last obstacle and the spot where the
+    next one will appear, keeping POWERUP_CLEARANCE pixels from both, so it
+    never sits on top of a hazard. If that gap is already on screen, nothing
+    spawns and a quick retry is scheduled.
+
+    Args:
+        powerups: list of active items (appended to in place).
+        current_time: game time in seconds.
+        obstacles: current obstacles, used to find a free gap.
+
+    Returns:
+        The game time at which the next spawn should be attempted.
+    """
+    if not obstacles:
+        return current_time + POWERUP_RETRY_DELAY
+
+    last = obstacles[-1]
+    earliest_x = CANVAS_WIDTH + 12  # Always appear from off-screen
+    slot_start = last["rect"].right + POWERUP_CLEARANCE
+    slot_end = last["rect"].right + last["gap"] - POWERUP_CLEARANCE
+    if slot_end < earliest_x:
+        return current_time + POWERUP_RETRY_DELAY
+
+    x = max(earliest_x, random.uniform(slot_start, slot_end))
+    powerup_type = _choose_weighted({name: cfg["weight"] for name, cfg in POWERUP_TYPES.items()})
+    base_y = POWERUP_HEIGHTS[_choose_weighted(POWERUP_HEIGHT_WEIGHTS)]
+
+    powerups.append({
+        "type": powerup_type,
+        "x": float(x),
+        "base_y": base_y,
+        "y": float(base_y),
+        "spawn_time": current_time,
+    })
+    return current_time + random.uniform(*POWERUP_INTERVAL)
+
+
+def update_powerups(powerups, scroll_speed, current_time):
+    """Scroll items with the ground, bob them up and down, drop off-screen ones."""
+    for item in powerups:
+        item["x"] -= scroll_speed
+        age = current_time - item["spawn_time"]
+        item["y"] = item["base_y"] + math.sin(age * 4.0) * POWERUP_BOB_AMPLITUDE
+    return [item for item in powerups if item["x"] > -12]
+
+
+def check_item_collisions(player, powerups):
+    """Find the items the ball touches and remove them from `powerups`.
+
+    Returns:
+        The list of collected items.
+    """
+    cx, cy = player["rect"].center
+    reach = PLAYER_RADIUS + POWERUP_RADIUS
+    collected = [item for item in powerups
+                 if (item["x"] - cx) ** 2 + (item["y"] - cy) ** 2 < reach ** 2]
+    for item in collected:
+        powerups.remove(item)
+    return collected
+
+
+def apply_powerup_effect(player, powerup_type):
+    """Give the player a power-up.
+
+    Timed effects (double jump, invincibility) start, or restart at full
+    length if already active. Picking up a Winged Horseshoe mid-air makes
+    the double jump usable straight away.
+
+    Returns:
+        Feedback for the caller: {"bonus": points, "text": popup, "color": rgb}.
+    """
+    config = POWERUP_TYPES[powerup_type]
+    if config["duration"]:
+        player["effects"][powerup_type] = config["duration"]
+    if powerup_type == "double_jump":
+        player["double_jump_ready"] = True
+
+    return {
+        "bonus": config.get("bonus", 0),
+        "text": config["popup"],
+        "color": config["text_color"],
+    }
+
+
+def smash_obstacle(state, obstacle):
+    """Destroy an obstacle the invincible ball ran into, with debris and a bonus.
+
+    The obstacle stays in the list (hidden and harmless) so spacing to the
+    next obstacle and to power-ups is still measured from it.
+    """
+    obstacle["smashed"] = True
+    emit_smash_debris(state["particles"], obstacle)
+    state["score"] += SMASH_POINTS
+    rect = obstacle["rect"]
+    add_floating_text(state["floating_texts"], f"SMASH +{SMASH_POINTS}",
+                      rect.centerx, rect.top - 12, COLOR_GOLD)
+    state["shake"] = max(state["shake"], SMASH_SHAKE_FRAMES)
+
+
+_sprite_cache = {}
+
+
+def _build_pixel_sprite(rows, colors, outline=COLOR_TEXT_DARK):
+    """Turn a list of pixel-art strings into a surface with a 1 px dark outline."""
+    height, width = len(rows), len(rows[0])
+    sprite = pygame.Surface((width + 2, height + 2), pygame.SRCALPHA)
+    filled = [(x, y) for y, row in enumerate(rows) for x, cell in enumerate(row) if cell != "."]
+
+    for x, y in filled:  # Outline: every neighbour of a filled pixel
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            sprite.fill(outline, (x + 1 + dx, y + 1 + dy, 1, 1))
+    for x, y in filled:
+        sprite.fill(colors[rows[y][x]], (x + 1, y + 1, 1, 1))
+    return sprite
+
+
+def _powerup_icon(powerup_type):
+    """The pixel-art icon for an item type (built once, then cached)."""
+    key = ("powerup", powerup_type)
+    if key not in _sprite_cache:
+        _sprite_cache[key] = _build_pixel_sprite(POWERUP_PIXEL_ART[powerup_type],
+                                                 POWERUP_PIXEL_COLORS)
+    return _sprite_cache[key]
+
+
+def _wing_sprite(frame_index, facing_left):
+    """One frame of the little double-jump wings."""
+    key = ("wing", frame_index, facing_left)
+    if key not in _sprite_cache:
+        rows = WING_FRAMES[frame_index]
+        if not facing_left:
+            rows = [row[::-1] for row in rows]
+        _sprite_cache[key] = _build_pixel_sprite(rows, {"w": COLOR_WHITE})
+    return _sprite_cache[key]
+
+
+def draw_powerups(screen, powerups, tick):
+    """Draw floating items with a ground shadow, pulsing glow and an orbiting sparkle."""
+    for item in powerups:
+        config = POWERUP_TYPES[item["type"]]
+        icon = _powerup_icon(item["type"])
+        cx, cy = round(item["x"]), round(item["y"])
+
+        height_above_ground = GROUND_Y - cy
+        _draw_ground_shadow(screen, cx, max(3, 10 - height_above_ground // 6))
+
+        phase = tick * 0.15 + item["spawn_time"] * 7
+        pulse = (math.sin(phase) + 1) / 2
+        radius = 8 + round(pulse * 2)
+        glow = pygame.Surface((radius * 2 + 1, radius * 2 + 1), pygame.SRCALPHA)
+        pygame.draw.circle(glow, (*config["glow"], 60 + int(pulse * 50)), (radius, radius), radius)
+        screen.blit(glow, (cx - radius, cy - radius))
+
+        screen.blit(icon, (cx - icon.get_width() // 2, cy - icon.get_height() // 2))
+
+        angle = tick * 0.12 + item["spawn_time"]
+        sparkle_x = cx + round(math.cos(angle) * 10)
+        sparkle_y = cy + round(math.sin(angle) * 10)
+        screen.fill(COLOR_WHITE, (sparkle_x, sparkle_y, 1, 1))
+        if (tick // 6) % 2 == 0:  # Twinkle into a small cross
+            screen.fill(COLOR_WHITE, (sparkle_x - 1, sparkle_y, 3, 1))
+            screen.fill(COLOR_WHITE, (sparkle_x, sparkle_y - 1, 1, 3))
+
+
+# ===========================================================================
+# Floating feedback text
+# ===========================================================================
+
+def add_floating_text(texts, text, x, y, color):
+    """Add a pop-up text centred on x. Texts spawned together stack upward."""
+    recent = sum(1 for t in texts if t["age"] < 0.35)
+    texts.append({"text": text, "x": x, "y": float(y - recent * 9), "color": color, "age": 0.0})
+
+
+def update_floating_texts(texts, dt):
+    """Rise and age pop-up texts; drop the expired ones."""
+    for t in texts:
+        t["age"] += dt
+        t["y"] -= POPUP_RISE_SPEED * dt
+    return [t for t in texts if t["age"] < POPUP_LIFETIME]
+
+
+def draw_floating_texts(screen, texts):
+    """Draw pop-up texts, fading out over the last 40% of their life."""
+    for t in texts:
+        image = render_outlined_text(t["text"], t["color"])
+        progress = t["age"] / POPUP_LIFETIME
+        alpha = 255 if progress < 0.6 else int(255 * (1.0 - progress) / 0.4)
+        width = image.get_width()
+        x = max(2, min(CANVAS_WIDTH - width - 2, round(t["x"]) - width // 2))  # Stay on screen
+        faded = image.copy()
+        faded.set_alpha(max(0, alpha))
+        screen.blit(faded, (x, round(t["y"])))
 
 
 # ===========================================================================
@@ -937,6 +1370,8 @@ def draw_obstacles(screen, obstacles):
     """Draw every obstacle."""
     for obstacle in obstacles:
         kind = obstacle["kind"]
+        if obstacle["smashed"]:
+            continue
         if kind == "tumbleweed":
             _draw_tumbleweed(screen, obstacle)
         elif kind == "skull_rock":
@@ -1085,18 +1520,68 @@ def draw_player_shadow(screen, player_rect, squash_x):
     _draw_ground_shadow(screen, player_rect.centerx, max(4, width))
 
 
-def draw_player_with_squash(screen, player_rect, squash_x, squash_y, rotation_angle):
+def draw_player_with_squash(screen, player_rect, squash_x, squash_y, rotation_angle, tint=None):
     """Draw the rolling leather ball scaled by squash_x / squash_y.
 
     The sprite is scaled with nearest-neighbour filtering so it stays pixel
     crisp, and anchored at its bottom centre so squashing keeps it on the ground.
+    tint is an optional (r, g, b, a) colour washed over the ball (the
+    invincibility flash).
     """
     sprite = _render_ball_sprite(rotation_angle)
+    if tint is not None:
+        wash = pygame.Surface(sprite.get_size(), pygame.SRCALPHA)
+        pygame.draw.circle(wash, tint, (PLAYER_RADIUS, PLAYER_RADIUS), PLAYER_RADIUS - 1)
+        sprite.blit(wash, (0, 0))
+
     width = max(2, round(BALL_SIZE * squash_x))
     height = max(2, round(BALL_SIZE * squash_y))
     if (width, height) != sprite.get_size():
         sprite = pygame.transform.scale(sprite, (width, height))
     screen.blit(sprite, (player_rect.centerx - width // 2, player_rect.bottom + 1 - height))
+
+
+def draw_invincibility_aura(screen, player_rect, frames_left, tick):
+    """Golden glow with a rainbow ring and orbiting sparkles around the ball.
+
+    Blinks during the last EFFECT_WARNING_FRAMES so the player knows it is ending.
+    """
+    if frames_left < EFFECT_WARNING_FRAMES and (tick // 4) % 2:
+        return
+
+    cx, cy = player_rect.center
+    radius = PLAYER_RADIUS + 5
+    size = radius * 2 + 3
+    center = size // 2
+    pulse = (math.sin(tick * 0.3) + 1) / 2
+
+    aura = pygame.Surface((size, size), pygame.SRCALPHA)
+    pygame.draw.circle(aura, (*COLOR_GOLD, 50 + int(40 * pulse)), (center, center), radius)
+    ring_color = RAINBOW_COLORS[(tick // 3) % len(RAINBOW_COLORS)]
+    pygame.draw.circle(aura, (*ring_color, 220), (center, center), radius, 1)
+    screen.blit(aura, (cx - center, cy - center))
+
+    for k in range(4):
+        angle = tick * 0.18 + k * math.pi / 2
+        sparkle_x = cx + round(math.cos(angle) * (radius + 2))
+        sparkle_y = cy + round(math.sin(angle) * (radius + 2))
+        color = RAINBOW_COLORS[(tick // 3 + k) % len(RAINBOW_COLORS)]
+        screen.fill(color, (sparkle_x, sparkle_y, 1, 1))
+
+
+def draw_double_jump_wings(screen, player_rect, squash_x, squash_y, tick):
+    """Little flapping wings beside the ball while a double jump is available."""
+    width = max(2, round(BALL_SIZE * squash_x))
+    height = max(2, round(BALL_SIZE * squash_y))
+    left = player_rect.centerx - width // 2
+    center_y = player_rect.bottom + 1 - height // 2
+
+    frame_index = (tick // 6) % 2
+    left_wing = _wing_sprite(frame_index, facing_left=True)
+    right_wing = _wing_sprite(frame_index, facing_left=False)
+    wing_y = center_y - left_wing.get_height() // 2 - 1
+    screen.blit(left_wing, (left - left_wing.get_width() + 1, wing_y))
+    screen.blit(right_wing, (left + width - 1, wing_y))
 
 
 # ===========================================================================
@@ -1127,6 +1612,37 @@ def draw_hud(screen, score, high_score):
     if score_value < 25:
         draw_text(screen, "SPACE OR UP TO JUMP", CANVAS_WIDTH // 2, 100, COLOR_TEXT_DARK,
                   align="center", shadow=COLOR_SKY_TOP)
+
+
+def draw_active_powerup_hud(screen, active_effects):
+    """Top-left status rows: item icon, time-left bar and seconds for each timed effect.
+
+    Bars blink during the last EFFECT_WARNING_FRAMES.
+    """
+    x, y = 8, 19
+    bar_width = 40
+    for effect_type in HUD_EFFECT_ORDER:
+        frames_left = active_effects.get(effect_type, 0)
+        if frames_left <= 0:
+            continue
+
+        config = POWERUP_TYPES[effect_type]
+        icon = _powerup_icon(effect_type)
+        screen.blit(icon, (x, y))
+
+        bar_x = x + icon.get_width() + 3
+        bar_y = y + icon.get_height() // 2 - 2
+        fraction = frames_left / config["duration"]
+        warning = frames_left < EFFECT_WARNING_FRAMES and (frames_left // 6) % 2 == 0
+
+        screen.fill(COLOR_TEXT_DARK, (bar_x - 1, bar_y - 1, bar_width + 2, 6))
+        screen.fill(COLOR_HUD_BAR_BG, (bar_x, bar_y, bar_width, 4))
+        fill_color = COLOR_TEXT_LIGHT if warning else config["bar_color"]
+        screen.fill(fill_color, (bar_x, bar_y, max(1, round(bar_width * fraction)), 4))
+
+        draw_text(screen, f"{frames_left / FPS:.1f}", bar_x + bar_width + 4, bar_y - 2,
+                  COLOR_TEXT_DARK)  # Seconds left
+        y += icon.get_height() + 2
 
 
 def draw_game_over(screen, final_score, is_new_high_score=False):
@@ -1168,8 +1684,89 @@ def draw_game_over(screen, final_score, is_new_high_score=False):
 # Game loop helpers
 # ===========================================================================
 
+def update_player_movement(state):
+    """Jumping, double jumping, gravity, landing, dust and rolling for one frame."""
+    player = state["player"]
+    rect = player["rect"]
+    speed = state["scroll_speed"]
+    particles = state["particles"]
+
+    # A fresh key press while already airborne is a double-jump attempt. Checking
+    # before handle_input stops the ground jump's own key press from counting.
+    if state["jump_tapped"] and try_double_jump(player):
+        trigger_takeoff_stretch(player["squash"])
+        emit_double_jump_burst(particles, rect)
+    state["jump_tapped"] = False
+
+    # Input -> takeoff
+    was_airborne = player["is_jumping"]
+    is_jumping, velocity_y = handle_input(rect, was_airborne, player["velocity_y"])
+    if is_jumping and not was_airborne:
+        trigger_takeoff_stretch(player["squash"])
+        emit_takeoff_dust(particles, rect, speed)
+
+    # Physics -> landing
+    impact_speed = velocity_y + GRAVITY
+    velocity_y, still_airborne = update_physics(rect, velocity_y)
+    if is_jumping and not still_airborne:
+        trigger_landing_squash(player["squash"], impact_speed)
+        emit_landing_dust(particles, rect, speed, impact_speed)
+        player["double_jump_ready"] = True  # Landing refills the double jump
+    player["velocity_y"], player["is_jumping"] = velocity_y, still_airborne
+
+    if not still_airborne:
+        emit_running_dust(particles, rect, speed)
+
+    # The ball spins exactly as fast as the ground moves under it.
+    player["roll_angle"] += speed / PLAYER_RADIUS
+
+
+def update_powerup_system(state):
+    """Spawn, move and collect items, then apply their effects with feedback."""
+    player = state["player"]
+    game_time = state["frame"] / FPS
+
+    tick_active_effects(player)
+
+    if game_time >= state["next_powerup_time"]:
+        state["next_powerup_time"] = spawn_powerup(state["powerups"], game_time,
+                                                   state["obstacles"])
+    state["powerups"] = update_powerups(state["powerups"], state["scroll_speed"], game_time)
+
+    for item in check_item_collisions(player, state["powerups"]):
+        feedback = apply_powerup_effect(player, item["type"])
+        state["score"] += feedback["bonus"]
+        add_floating_text(state["floating_texts"], feedback["text"],
+                          player["rect"].centerx, player["rect"].top - 12, feedback["color"])
+        emit_pickup_sparkles(state["particles"], item["x"], item["y"], item["type"])
+
+
+def resolve_obstacle_collisions(state, high_score):
+    """Smash obstacles while invincible; otherwise a hit ends the run.
+
+    Returns:
+        The (possibly updated) session high score.
+    """
+    player = state["player"]
+    rect = player["rect"]
+
+    hit = find_colliding_obstacle(rect, state["obstacles"])
+    while hit is not None and "invincible" in player["effects"]:
+        smash_obstacle(state, hit)
+        hit = find_colliding_obstacle(rect, state["obstacles"])
+
+    if hit is not None:
+        state["game_over"] = True
+        state["shake"] = SHAKE_FRAMES
+        emit_crash_burst(state["particles"], rect)
+        if state["score"] > high_score:
+            state["new_high_score"] = high_score > 0
+            high_score = state["score"]
+    return high_score
+
+
 def update_running_game(state, high_score):
-    """Advance one frame of play: input, physics, obstacles, score, collisions.
+    """Advance one frame of play: movement, obstacles, power-ups, score, collisions.
 
     Returns:
         The (possibly updated) session high score.
@@ -1177,72 +1774,74 @@ def update_running_game(state, high_score):
     state["frame"] += 1
     state["scroll_speed"] = min(MAX_SPEED, BASE_SPEED + state["frame"] * SPEED_GAIN_PER_FRAME)
     speed = state["scroll_speed"]
-    player_rect = state["player_rect"]
-    particles = state["particles"]
 
-    # Input -> takeoff
-    was_airborne = state["is_jumping"]
-    is_jumping, velocity_y = handle_input(player_rect, was_airborne, state["velocity_y"])
-    if is_jumping and not was_airborne:
-        trigger_takeoff_stretch(state["squash"])
-        emit_takeoff_dust(particles, player_rect, speed)
-
-    # Physics -> landing
-    impact_speed = velocity_y + GRAVITY
-    velocity_y, landed_airborne = update_physics(player_rect, velocity_y)
-    if is_jumping and not landed_airborne:
-        trigger_landing_squash(state["squash"], impact_speed)
-        emit_landing_dust(particles, player_rect, speed, impact_speed)
-    state["velocity_y"], state["is_jumping"] = velocity_y, landed_airborne
-
-    if not state["is_jumping"]:
-        emit_running_dust(particles, player_rect, speed)
-
-    # The ball spins exactly as fast as the ground moves under it.
-    state["roll_angle"] += speed / PLAYER_RADIUS
+    update_player_movement(state)
 
     state["obstacles"] = spawn_and_update_obstacles(state["obstacles"], speed)
+    update_powerup_system(state)
+
     state["distance"] += speed
     state["score"] += speed * SCORE_PER_PIXEL
 
-    if check_collision(player_rect, state["obstacles"]):
-        state["game_over"] = True
-        state["shake"] = SHAKE_FRAMES
-        emit_crash_burst(particles, player_rect)
-        if state["score"] > high_score:
-            state["new_high_score"] = high_score > 0
-            high_score = state["score"]
-
-    return high_score
+    return resolve_obstacle_collisions(state, high_score)
 
 
 def update_effects(state):
-    """Advance squash & stretch, motion trails and particles (also after a crash)."""
+    """Advance squash & stretch, trails, particles and pop-ups (also after a crash)."""
+    state["tick"] += 1
+    player = state["player"]
     running = not state["game_over"]
-    state["squash_x"], state["squash_y"] = update_squash_and_stretch(
-        state["squash"], state["velocity_y"], state["is_jumping"])
 
-    trail_active = running and (state["is_jumping"]
+    player["squash_x"], player["squash_y"] = update_squash_and_stretch(
+        player["squash"], player["velocity_y"], player["is_jumping"])
+
+    invincible = "invincible" in player["effects"]
+    trail_active = running and (player["is_jumping"] or invincible
                                 or state["scroll_speed"] >= TRAIL_SPEED_THRESHOLD)
     state["trail"] = update_motion_trail(
-        state["trail"], state["player_rect"], state["squash_x"], state["squash_y"],
+        state["trail"], player["rect"], player["squash_x"], player["squash_y"],
         state["scroll_speed"] if running else 0.0, trail_active, state["frame"])
 
     state["particles"] = update_particles(state["particles"], FRAME_TIME)
+    state["floating_texts"] = update_floating_texts(state["floating_texts"], FRAME_TIME)
     if state["shake"] > 0:
         state["shake"] -= 1
 
 
+def draw_player(screen, player, tick):
+    """Draw the ball with its power-up visuals: aura, gold flash and wings."""
+    effects = player["effects"]
+    rect = player["rect"]
+    squash_x, squash_y = player["squash_x"], player["squash_y"]
+
+    tint = None
+    if "invincible" in effects:
+        draw_invincibility_aura(screen, rect, effects["invincible"], tick)
+        if (tick // 3) % 2 == 0:
+            tint = (*COLOR_GOLD, 110)
+
+    draw_player_with_squash(screen, rect, squash_x, squash_y, player["roll_angle"], tint)
+
+    if "double_jump" in effects and player["double_jump_ready"]:
+        draw_double_jump_wings(screen, rect, squash_x, squash_y, tick)
+
+
 def draw_scene(canvas, state, high_score):
     """Draw one complete frame onto the low-resolution canvas."""
+    player = state["player"]
+    tick = state["tick"]
+    invincible = "invincible" in player["effects"]
+
     draw_western_background(canvas, state["distance"])
     draw_obstacles(canvas, state["obstacles"])
-    draw_motion_trails(canvas, state["trail"])
-    draw_player_shadow(canvas, state["player_rect"], state["squash_x"])
+    draw_powerups(canvas, state["powerups"], tick)
+    draw_motion_trails(canvas, state["trail"], COLOR_GOLD if invincible else COLOR_LEATHER)
+    draw_player_shadow(canvas, player["rect"], player["squash_x"])
     draw_particles(canvas, state["particles"])
-    draw_player_with_squash(canvas, state["player_rect"], state["squash_x"],
-                            state["squash_y"], state["roll_angle"])
+    draw_player(canvas, player, tick)
+    draw_floating_texts(canvas, state["floating_texts"])
     draw_hud(canvas, state["score"], high_score)
+    draw_active_powerup_hud(canvas, player["effects"])
     if state["game_over"]:
         draw_game_over(canvas, state["score"], state["new_high_score"])
 
@@ -1274,10 +1873,12 @@ def main():
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     running = False
-                elif (state["game_over"]
-                      and event.key in (pygame.K_r, pygame.K_SPACE)
-                      and state["game_over_timer"] >= RESTART_DELAY_FRAMES):
-                    state = reset_game()
+                elif state["game_over"]:
+                    if (event.key in (pygame.K_r, pygame.K_SPACE)
+                            and state["game_over_timer"] >= RESTART_DELAY_FRAMES):
+                        state = reset_game()
+                elif event.key in (pygame.K_SPACE, pygame.K_UP):
+                    state["jump_tapped"] = True  # Used for mid-air double jumps
 
         if state["game_over"]:
             state["game_over_timer"] += 1

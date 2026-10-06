@@ -2,7 +2,8 @@
 
 A pixel-art endless runner set in the Wild West, built with Python and Pygame.
 Roll a stitched leather ball across the desert, jump over cacti, skull rocks
-and tumbleweeds, and see how far you can get as the pace keeps picking up.
+and tumbleweeds, grab power-ups, and see how far you can get as the pace
+keeps picking up.
 
 All graphics, including the font, are drawn in code, so there are no asset
 files to download.
@@ -52,7 +53,7 @@ python main.py
 
 | Key            | Action                          |
 | -------------- | ------------------------------- |
-| `SPACE` / `UP` | Jump                            |
+| `SPACE` / `UP` | Jump (press again in mid-air with a Winged Horseshoe) |
 | `DOWN`         | Drop faster while in the air    |
 | `R` / `SPACE`  | Restart after Game Over         |
 | `ESC`          | Quit                            |
@@ -66,7 +67,76 @@ python main.py
   the longer you survive.
 - The high score is kept for the current session.
 
+### Power-ups
+
+| Item | Effect |
+| --- | --- |
+| Winged Horseshoe | **Double jump** for 10 seconds: press `SPACE` / `UP` again in mid-air |
+| Golden Star | **Invincible** for 5 seconds: smash straight through obstacles (+20 each) |
+| Coin Bag | **+100 bonus points** right away |
+
+Items float on the ground (roll into them) or in the air (jump for them).
+Grabbing an item you already have restarts its timer.
+
 ## What you made better
+
+### Power-up system
+
+- **Three Western items drawn as pixel art:** a Winged Horseshoe, a
+  Golden Star and a Coin Bag with a gold `$`. Each one has a dark outline so
+  it stands out against the sand and sky.
+- **Floating pickups:** items bob up and down, pulse with a coloured glow,
+  have a sparkle circling them and cast a shadow that shrinks with height.
+- **Fair placement:** a new item appears every 6–11 seconds (the first after
+  4), always in the empty stretch between two obstacles and at least 28 px
+  from both, so an item never sits on a hazard. Heights vary: on the
+  ground (roll into it), low (caught over most of a jump), or high (near the
+  top of a jump).
+- **Pickup feedback:** a sparkle burst in the item's colours, and a pop-up
+  text that rises and fades ("DOUBLE JUMP ACTIVE!", "INVINCIBLE!",
+  "+100 BONUS!"). Pop-ups stack when they appear together and stay on
+  screen near the edges.
+
+### Double jump
+
+- While the Winged Horseshoe is active, a fresh press of `SPACE` / `UP` in
+  mid-air gives a second, slightly smaller jump. A full double jump reaches
+  about 73 px, compared with about 43 px for a single jump.
+- Only one extra jump per trip through the air, and landing refills it.
+  Holding the key down doesn't use it up, and neither does the press that
+  starts a normal jump.
+- Small white wings flap beside the ball while the double jump is ready.
+  Using it plays the takeoff stretch and puffs out white feathers.
+
+### Invincibility
+
+- The Golden Star makes the ball invulnerable for 5 seconds.
+- **Aura:** a pulsing golden glow with a rainbow ring and four rainbow
+  sparkles circling the ball. The ball itself flashes gold and leaves a gold
+  motion trail.
+- **Smashing:** obstacles you run into burst into debris in their own
+  colours (green for cacti, grey for rock, brown for tumbleweeds). Each one
+  gives +20 points, shows a "SMASH +20" pop-up and shakes the screen a
+  little.
+- The aura blinks for the last 1.5 seconds so the end never comes as a
+  surprise.
+
+### Active power-up HUD
+
+- In the top-left corner, each timed effect gets a row: its icon, a bar
+  that empties as time runs out, and the seconds left. The bar blinks during
+  the last 1.5 seconds.
+
+### Fixes along the way
+
+- **Obstacle spacing at top speed:** an obstacle that had scrolled off the
+  left edge used to be removed before the next one was due. With nothing
+  left to measure from, the next obstacle appeared straight away, making
+  gaps at top speed shorter than intended. The newest obstacle is now kept
+  until the next one spawns, so every gap is honoured. Power-up placement
+  relies on this.
+- Smashed obstacles are hidden and harmless but stay in the list for the
+  same reason.
 
 ### Western pixel-art style
 
@@ -141,16 +211,25 @@ Main functions in `main.py`:
 | --- | --- |
 | `init_game()` | Starts Pygame and creates the window, clock and starting state |
 | `reset_game()` | Resets score, player, speed, obstacles and effects |
+| `create_player()` | Builds the player: position, motion, animation and active power-ups |
 | `handle_input(player_rect, is_jumping, velocity_y)` | Reads the jump and fast-fall keys |
+| `try_double_jump(player)` | Mid-air jump when a Winged Horseshoe is active and unused |
 | `update_physics(player_rect, velocity_y)` | Applies gravity and landing |
 | `update_squash_and_stretch(squash, velocity_y, is_jumping)` | Springs the ball's shape toward its target |
 | `spawn_and_update_obstacles(obstacles, scroll_speed)` | Moves, removes and spawns obstacles |
 | `check_collision(player_rect, obstacles)` | Tests the ball's circle against each obstacle |
+| `spawn_powerup(powerups, current_time, obstacles)` | Places an item in a safe gap and returns when the next is due |
+| `check_item_collisions(player, powerups)` | Returns (and removes) the items the ball touches |
+| `apply_powerup_effect(player, powerup_type)` | Starts the effect and returns bonus points and pop-up text |
+| `smash_obstacle(state, obstacle)` | Destroys an obstacle hit while invincible |
+| `add_floating_text(...)` / `draw_floating_texts(...)` | Rising, fading pop-up text |
 | `update_particles(particles, dt)` | Moves, settles and expires dust particles |
 | `update_motion_trail(...)` / `draw_motion_trails(screen, trail_history)` | Records and draws the afterimages |
 | `draw_western_background(screen, camera_offset)` | Draws the sky, sun and parallax layers |
 | `draw_player_with_squash(screen, player_rect, squash_x, squash_y, rotation_angle)` | Draws the rolling, squashing ball |
+| `draw_invincibility_aura(...)` / `draw_double_jump_wings(...)` | Power-up visuals on the ball |
 | `draw_hud(screen, score, high_score)` | Draws the score and high score |
+| `draw_active_powerup_hud(screen, active_effects)` | Draws the icon, timer bar and seconds left for each active effect |
 | `draw_game_over(screen, final_score)` | Draws the Game Over sign |
 | `main()` | Runs the game loop |
 
@@ -164,6 +243,9 @@ The constants at the top of `main.py` control the feel of the game:
 - `TRAIL_LENGTH`, `TRAIL_SPEED_THRESHOLD`, `TRAIL_MAX_ALPHA`: afterimage length, when they appear and how strong they are
 - `MAX_PARTICLES`, `PARTICLE_GRAVITY`: dust amount and weight
 - `SHAKE_FRAMES`, `SHAKE_STRENGTH`: crash screen shake
+- `POWERUP_TYPES`: each item's duration, spawn weight, pop-up text and colours
+- `POWERUP_INTERVAL`, `FIRST_POWERUP_TIME`, `POWERUP_HEIGHTS`: how often items appear and at what heights
+- `DOUBLE_JUMP_VELOCITY`, `SCORE_BOOST_POINTS`, `SMASH_POINTS`: strength of each power-up
 - `OBSTACLE_TYPES`: obstacle sizes and how often each one appears
 - `PARALLAX_LAYERS`: the scroll speed of each background layer
 - `PIXEL_SCALE`: window size (the game draws at 320×180 and scales up by this factor)
